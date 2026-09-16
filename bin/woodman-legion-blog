@@ -1,0 +1,157 @@
+#!/data/data/com.termux/files/usr/bin/env python3
+"""Blog post publisher — posts via email-send (preferred) or google-api blogger."""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+CONFIG_DIR  = Path.home() / ".config" / "woodman-legion-blog"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+def load_config():
+    if not CONFIG_FILE.exists():
+        raise SystemExit(
+            f"Config not found: {CONFIG_FILE}\n"
+            f"See config.example.json in the skill repo."
+        )
+    return json.loads(CONFIG_FILE.read_text())
+
+# ── Backend detection ─────────────────────────────────────────────────────────
+
+def has_email_skill():
+    return shutil.which("email-send") is not None
+
+def has_google_api():
+    return shutil.which("google-api") is not None
+
+def active_backend():
+    if has_email_skill():
+        return "email"
+    if has_google_api():
+        return "blogger"
+    return None
+
+# ── Post via email-send ───────────────────────────────────────────────────────
+
+def post_via_email(title, body_html, cfg):
+    post_email = cfg.get("post_email")
+    if not post_email:
+        raise SystemExit("config missing 'post_email' — required for email backend")
+
+    cmd = ["email-send", "--to", post_email, "--subject", title, "--body", body_html, "--html"]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise SystemExit(f"email-send failed:\n{result.stderr}")
+    return {"backend": "email", "to": post_email, "title": title}
+
+# ── Post via google-api blogger ───────────────────────────────────────────────
+
+def post_via_blogger(title, body_html, cfg, draft=False):
+    blog_id = cfg.get("blog_id")
+    if not blog_id:
+        raise SystemExit("config missing 'blog_id' — required for blogger backend")
+
+    cmd = ["google-api", "blogger", "post", blog_id, "--title", title, "--content", body_html]
+    if draft:
+        cmd.append("--draft")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise SystemExit(f"google-api blogger post failed:\n{result.stderr}")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"backend": "blogger", "output": result.stdout.strip()}
+
+# ── Commands ──────────────────────────────────────────────────────────────────
+
+def cmd_post(args):
+    cfg = load_config()
+
+    title = args.title
+    if args.body_file:
+        body_html = Path(args.body_file).read_text()
+    elif args.body:
+        body_html = args.body
+    else:
+        raise SystemExit("Provide --body or --body-file")
+
+    backend = args.backend or active_backend()
+    if backend is None:
+        raise SystemExit(
+            "No posting backend available.\n"
+            "Install email-send (preferred) or google-api."
+        )
+
+    if backend == "email":
+        if not has_email_skill():
+            raise SystemExit("email-send not found — install email skill or use --backend blogger")
+        result = post_via_email(title, body_html, cfg)
+    elif backend == "blogger":
+        if not has_google_api():
+            raise SystemExit("google-api not found — install google-api skill")
+        result = post_via_blogger(title, body_html, cfg, draft=args.draft)
+    else:
+        raise SystemExit(f"Unknown backend: {backend}. Use 'email' or 'blogger'.")
+
+    print(json.dumps(result, indent=2))
+
+def cmd_status(args):
+    cfg = load_config()
+    backend = active_backend()
+    print(json.dumps({
+        "active_backend": backend,
+        "email_skill":    has_email_skill(),
+        "google_api":     has_google_api(),
+        "blog_id":        cfg.get("blog_id"),
+        "post_email":     cfg.get("post_email"),
+    }, indent=2))
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="woodman-legion-blog",
+        description="Blog post publisher — email-send (preferred) or google-api blogger",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  woodman-legion-blog post --title 'Hello' --body '<p>World</p>'\n"
+            "  woodman-legion-blog post --title 'Hello' --body-file post.html\n"
+            "  woodman-legion-blog post --title 'Draft' --body '...' --draft\n"
+            "  woodman-legion-blog post --title 'Hello' --body '...' --backend blogger\n"
+            "  woodman-legion-blog status\n"
+        ),
+    )
+    parser.add_argument("--version", action="version", version="woodman-legion-blog 1.0.0")
+
+    top = parser.add_subparsers(dest="command", required=True)
+
+    p = top.add_parser("post", help="Publish a blog post")
+    p.add_argument("--title",     required=True, help="Post title")
+    p.add_argument("--body",      help="HTML body as a string")
+    p.add_argument("--body-file", dest="body_file", help="Path to HTML file")
+    p.add_argument("--draft",     action="store_true", help="Save as draft (blogger backend only)")
+    p.add_argument("--backend",   choices=["email", "blogger"],
+                   help="Force a specific backend (default: auto-detect)")
+    p.set_defaults(func=cmd_post)
+
+    p = top.add_parser("status", help="Show backend availability and config")
+    p.set_defaults(func=cmd_status)
+
+    args = parser.parse_args()
+    try:
+        args.func(args)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}), file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
