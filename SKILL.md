@@ -58,10 +58,16 @@ woodman-legion-blog status
 ```
 
 This tool does not yet expose `google-api gmail send`'s `--image PATH[:CID]` (inline
-attachments via Content-ID) — it just forwards `--body` as-is. Data URI `<img>` tags
-inside `--body`/`--body-file` HTML go through either backend unchanged and should
-render; real `cid:`-attached images currently require calling `google-api gmail send`
-directly rather than through this wrapper.
+attachments via Content-ID) — it just forwards `--body` as-is.
+
+**Data URI `<img>` tags do not work on the `blogger` backend — verified, not assumed.**
+Tested 2026-10-06: a `data:image/png;base64,...` posted via `blogger post --draft`
+came back from the Blogger API byte-identical (storage/retrieval doesn't touch it), but
+rendered as a broken-image placeholder, not the image, when actually viewed. So the
+REST path cannot do inline images by any route, data URI or otherwise — only the
+`email` backend (SMTP, real `cid:` attachments) actually works for that. An earlier
+version of this doc claimed data URIs "render correctly" — that was never tested at
+the time and was wrong.
 
 ## Notes
 
