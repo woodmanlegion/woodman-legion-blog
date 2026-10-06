@@ -69,6 +69,18 @@ REST path cannot do inline images by any route, data URI or otherwise — only t
 version of this doc claimed data URIs "render correctly" — that was never tested at
 the time and was wrong.
 
+**Blogger images (however they get uploaded — web UI or post-by-email) aren't
+reachable or deletable from here at all.** There is no media/image resource in the
+Blogger v3 API — no upload, no list, no delete. Once an image lands on
+`blogger.googleusercontent.com`, removing its `<img>` tag from a post only unlinks it;
+the file stays live at that URL indefinitely (these URLs don't expire) regardless of
+which backend posted it or whether the post itself still exists — deleting a blog does
+not delete its images either. The only way to actually delete one is Blogger's own web
+UI media manager at `blogger.com/mediamanager` (account-scoped — can show images from
+a blog you no longer have, e.g. one you deleted; this is normal, not a bug). The old,
+now-shut-down Album Archive (Picasa's successor, killed July 2023) never held Blogger
+images regardless — don't look for them there.
+
 ## Notes
 
 - Body is always HTML — wrap plain text in `<p>` tags
