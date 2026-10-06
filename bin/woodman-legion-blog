@@ -1,5 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/env python3
-"""Blog post publisher — posts via email-send (preferred) or google-api blogger."""
+"""Blog post publisher — posts via google-api gmail send (SMTP, preferred when an
+app password is configured — supports inline images) or google-api blogger."""
 
 import argparse
 import json
@@ -9,8 +10,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-CONFIG_DIR  = Path.home() / ".config" / "woodman-legion-blog"
-CONFIG_FILE = CONFIG_DIR / "config.json"
+CONFIG_DIR     = Path.home() / ".config" / "woodman-legion-blog"
+CONFIG_FILE    = CONFIG_DIR / "config.json"
+APP_PASSWD_FILE = Path.home() / ".config" / "google-api" / "app.passwd"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -24,31 +26,35 @@ def load_config():
 
 # ── Backend detection ─────────────────────────────────────────────────────────
 
-def has_email_skill():
-    return shutil.which("email-send") is not None
-
 def has_google_api():
     return shutil.which("google-api") is not None
 
+def has_email_backend():
+    # SMTP send (inline images) only exists in google-api once an app password
+    # is configured — without one, gmail send still works but can't do images,
+    # so there is nothing this backend offers over plain blogger.
+    return has_google_api() and APP_PASSWD_FILE.exists()
+
 def active_backend():
-    if has_email_skill():
+    if has_email_backend():
         return "email"
     if has_google_api():
         return "blogger"
     return None
 
-# ── Post via email-send ───────────────────────────────────────────────────────
+# ── Post via google-api gmail send (SMTP) ─────────────────────────────────────
 
 def post_via_email(title, body_html, cfg):
     post_email = cfg.get("post_email")
     if not post_email:
         raise SystemExit("config missing 'post_email' — required for email backend")
 
-    cmd = ["email-send", "--to", post_email, "--subject", title, "--body", body_html, "--html"]
+    cmd = ["google-api", "gmail", "send", "--to", post_email,
+           "--subject", title, "--body", body_html, "--yes"]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise SystemExit(f"email-send failed:\n{result.stderr}")
-    return {"backend": "email", "to": post_email, "title": title}
+        raise SystemExit(f"google-api gmail send failed:\n{result.stderr}")
+    return {"backend": "email", "to": post_email, "title": title, "output": result.stdout.strip()}
 
 # ── Post via google-api blogger ───────────────────────────────────────────────
 
@@ -85,12 +91,16 @@ def cmd_post(args):
     if backend is None:
         raise SystemExit(
             "No posting backend available.\n"
-            "Install email-send (preferred) or google-api."
+            "Install google-api (and, for inline images, an app password at "
+            f"{APP_PASSWD_FILE})."
         )
 
     if backend == "email":
-        if not has_email_skill():
-            raise SystemExit("email-send not found — install email skill or use --backend blogger")
+        if not has_email_backend():
+            raise SystemExit(
+                f"No app password at {APP_PASSWD_FILE} — email backend unavailable, "
+                "use --backend blogger"
+            )
         result = post_via_email(title, body_html, cfg)
     elif backend == "blogger":
         if not has_google_api():
@@ -105,11 +115,12 @@ def cmd_status(args):
     cfg = load_config()
     backend = active_backend()
     print(json.dumps({
-        "active_backend": backend,
-        "email_skill":    has_email_skill(),
-        "google_api":     has_google_api(),
-        "blog_id":        cfg.get("blog_id"),
-        "post_email":     cfg.get("post_email"),
+        "active_backend":  backend,
+        "email_backend":   has_email_backend(),
+        "app_passwd_file": str(APP_PASSWD_FILE),
+        "google_api":      has_google_api(),
+        "blog_id":         cfg.get("blog_id"),
+        "post_email":      cfg.get("post_email"),
     }, indent=2))
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -117,7 +128,8 @@ def cmd_status(args):
 def main():
     parser = argparse.ArgumentParser(
         prog="woodman-legion-blog",
-        description="Blog post publisher — email-send (preferred) or google-api blogger",
+        description="Blog post publisher — google-api gmail send (SMTP, preferred when "
+                    "an app password is set) or google-api blogger",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
