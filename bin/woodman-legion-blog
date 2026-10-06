@@ -57,7 +57,7 @@ def post_via_blogger(title, body_html, cfg, draft=False):
     if not blog_id:
         raise SystemExit("config missing 'blog_id' — required for blogger backend")
 
-    cmd = ["google-api", "blogger", "post", blog_id, "--title", title, "--content", body_html]
+    cmd = ["google-api", "blogger", "post", blog_id, "--title", title, "--content", body_html, "--yes"]
     if draft:
         cmd.append("--draft")
     result = subprocess.run(cmd, capture_output=True, text=True)
